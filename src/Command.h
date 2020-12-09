@@ -194,7 +194,7 @@ public:
         SubMsg,
 
         MaxCommands,
-        MaxCustomCommands = 16,
+        MaxCustomCommands = 128,
         AvailableCommands = MaxCommands + MaxCustomCommands,
     };
     enum Mode
