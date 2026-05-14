@@ -7,6 +7,7 @@
 #ifndef _PREDIXY_STRING_h_
 #define _PREDIXY_STRING_h_
 
+#include <ctime>
 #include <string.h>
 #include <strings.h>
 #include <stdio.h>
@@ -244,7 +245,11 @@ public:
     bool strftime(const char* fmt, time_t t)
     {
         struct tm m;
-        localtime_r(&t, &m);
+#ifdef _WIN32
+    localtime_s(&m, &t);
+#else
+    localtime_r(&t, &m);
+#endif
         int ret = ::strftime(mBuf, Size, fmt, &m);
         return ret > 0 && ret < Size;
     }

@@ -47,7 +47,7 @@ else
 $(error Unknown event:$(EV))
 endif
 
-CFLAGS = -std=c++11 -Wall -w $(Opts)
+CFLAGS = -std=gnu++11 -Wall -w $(Opts)
 INCFLAGS =
 LDFLAGS += $(LDLIBCPP) -rdynamic -lpthread
 

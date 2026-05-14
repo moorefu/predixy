@@ -1,0 +1,12 @@
+# Build outputs
+src/*.o
+src/predixy
+src/predixy.exe
+
+# IDE
+.vscode/
+
+# Editor
+*~
+*.swp
+*.swo

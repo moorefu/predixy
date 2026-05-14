@@ -41,12 +41,24 @@ void ConfParser::clear()
     mStrings.clear();
 }
 
+static bool isAbsPath(const std::string& name)
+{
+    if (name[0] == '/' || name[0] == '\\') {
+        return true;
+    }
+    if (name.length() >= 3 && isalpha(name[0]) && name[1] == ':'
+            && (name[2] == '/' || name[2] == '\\')) {
+        return true;
+    }
+    return false;
+}
+
 std::string* ConfParser::getFile(const std::string& name, const char* parent)
 {
     if (name.empty()) {
         Throw(EmptyFileName, "filename is empty");
     }
-    if (name[0] == '/') {
+    if (isAbsPath(name)) {
         return new std::string(name);
     }
     std::string ret;
@@ -56,7 +68,7 @@ std::string* ConfParser::getFile(const std::string& name, const char* parent)
         if (len < (int)sizeof(buf)) {
             int n = len - 1;
             while (n >= 0) {
-                if (parent[n] == '/') {
+                if (parent[n] == '/' || parent[n] == '\\') {
                     break;
                 }
                 --n;
@@ -181,6 +193,9 @@ ConfParser::Node* ConfParser::load(const char* file)
 
 ConfParser::Status ConfParser::parse(std::string& line, std::string& key, std::string& val)
 {
+    if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+    }
     key.clear();
     val.clear();
     State s = KeyReady;
