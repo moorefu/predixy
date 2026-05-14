@@ -50,7 +50,6 @@ jobs:
         run: |
           VERSION="${{ inputs.release_version }}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "PREDIXY_DIST=predixy-$VERSION" >> $GITHUB_ENV
           git archive -o predixy-$VERSION.tar.gz HEAD
 
       - name: Upload source
@@ -61,26 +60,47 @@ jobs:
 
   build-linux:
     needs: prepare
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            container: quay.io/pypa/manylinux2014_x86_64
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            container: quay.io/pypa/manylinux2014_aarch64
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.container }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: sudo apt-get install -y g++ make
+      - name: Setup devtoolset
+        run: |
+          for dts in /opt/rh/devtoolset-*/enable; do
+            if [ -f "$dts" ]; then
+              echo "DEVTOOLSET=$dts" >> $GITHUB_ENV
+              echo "Found devtoolset: $dts"
+              break
+            fi
+          done
 
       - name: Build
         run: |
+          [ -n "$DEVTOOLSET" ] && source "$DEVTOOLSET"
           cd src
           make EV=epoll -j$(nproc)
 
       - name: Verify
-        run: src/predixy --version
+        run: |
+          [ -n "$DEVTOOLSET" ] && source "$DEVTOOLSET"
+          src/predixy --version
 
       - name: Package
         run: |
           VERSION="${{ needs.prepare.outputs.release_version }}"
-          DIST="predixy-$VERSION-linux-x64"
+          DIST="predixy-$VERSION-linux-glibc2.17-${{ matrix.arch }}"
           mkdir -p "$DIST/conf"
           cp src/predixy "$DIST/"
           cp conf/*.conf "$DIST/conf/"
@@ -90,14 +110,19 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: predixy-linux
+          name: predixy-linux-${{ matrix.arch }}
           path: |
-            predixy-*-linux-x64.tar.gz
-            predixy-*-linux-x64.tar.gz.sha256
+            predixy-*-linux-glibc2.17-${{ matrix.arch }}.tar.gz
+            predixy-*-linux-glibc2.17-${{ matrix.arch }}.tar.gz.sha256
 
-  build-msys2:
+  build-windows:
     needs: prepare
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - uses: actions/checkout@v4
@@ -121,7 +146,7 @@ jobs:
         shell: msys2 {0}
         run: |
           VERSION="${{ needs.prepare.outputs.release_version }}"
-          DIST="predixy-$VERSION-Windows-x64-msys2"
+          DIST="predixy-$VERSION-windows-${{ matrix.arch }}-msys2"
           mkdir -p "$DIST/conf"
           cp src/predixy.exe "$DIST/"
           cp conf/*.conf "$DIST/conf/"
@@ -135,20 +160,18 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: predixy-msys2
+          name: predixy-windows-${{ matrix.arch }}
           path: |
-            predixy-*-Windows-x64-msys2.zip
-            predixy-*-Windows-x64-msys2.zip.sha256
+            predixy-*-windows-${{ matrix.arch }}-msys2.zip
+            predixy-*-windows-${{ matrix.arch }}-msys2.zip.sha256
 
   release:
-    needs: [prepare, build-linux, build-msys2]
+    needs: [prepare, build-linux, build-windows]
     runs-on: ubuntu-latest
 
     steps:
       - name: Set version
-        run: |
-          echo "VERSION=${{ needs.prepare.outputs.release_version }}" >> $GITHUB_ENV
-          echo "PREDIXY_DIST=predixy-${{ needs.prepare.outputs.release_version }}" >> $GITHUB_ENV
+        run: echo "VERSION=${{ needs.prepare.outputs.release_version }}" >> $GITHUB_ENV
 
       - uses: actions/download-artifact@v4
 
@@ -161,7 +184,9 @@ jobs:
           make_latest: "${{ inputs.make_latest }}"
           prerelease: ${{ inputs.prerelease }}
           files: |
-            predixy-linux/${{ env.PREDIXY_DIST }}-linux-x64.tar.gz
-            predixy-linux/${{ env.PREDIXY_DIST }}-linux-x64.tar.gz.sha256
-            predixy-msys2/${{ env.PREDIXY_DIST }}-Windows-x64-msys2.zip
-            predixy-msys2/${{ env.PREDIXY_DIST }}-Windows-x64-msys2.zip.sha256
+            predixy-linux-x86_64/predixy-${{ env.VERSION }}-linux-glibc2.17-x86_64.tar.gz
+            predixy-linux-x86_64/predixy-${{ env.VERSION }}-linux-glibc2.17-x86_64.tar.gz.sha256
+            predixy-linux-aarch64/predixy-${{ env.VERSION }}-linux-glibc2.17-aarch64.tar.gz
+            predixy-linux-aarch64/predixy-${{ env.VERSION }}-linux-glibc2.17-aarch64.tar.gz.sha256
+            predixy-windows-x86_64/predixy-${{ env.VERSION }}-windows-x86_64-msys2.zip
+            predixy-windows-x86_64/predixy-${{ env.VERSION }}-windows-x86_64-msys2.zip.sha256
