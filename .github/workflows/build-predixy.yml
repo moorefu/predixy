@@ -65,37 +65,31 @@ jobs:
         include:
           - arch: x86_64
             runner: ubuntu-latest
-            container: quay.io/pypa/manylinux2014_x86_64
+            image: quay.io/pypa/manylinux2014_x86_64
           - arch: aarch64
             runner: ubuntu-24.04-arm
-            container: quay.io/pypa/manylinux2014_aarch64
+            image: quay.io/pypa/manylinux2014_aarch64
     runs-on: ${{ matrix.runner }}
-    container:
-      image: ${{ matrix.container }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup devtoolset
+      - name: Build in manylinux container
         run: |
-          for dts in /opt/rh/devtoolset-*/enable; do
-            if [ -f "$dts" ]; then
-              echo "DEVTOOLSET=$dts" >> $GITHUB_ENV
-              echo "Found devtoolset: $dts"
-              break
-            fi
-          done
-
-      - name: Build
-        run: |
-          [ -n "$DEVTOOLSET" ] && source "$DEVTOOLSET"
-          cd src
-          make EV=epoll -j$(nproc)
+          docker run --rm \
+            -v "$(pwd)":/workspace \
+            -w /workspace \
+            ${{ matrix.image }} \
+            sh -c '
+              for dts in /opt/rh/devtoolset-*/enable; do
+                [ -f "$dts" ] && source "$dts" && break
+              done
+              cd src
+              make EV=epoll -j$(nproc)
+            '
 
       - name: Verify
-        run: |
-          [ -n "$DEVTOOLSET" ] && source "$DEVTOOLSET"
-          src/predixy --version
+        run: src/predixy --version
 
       - name: Package
         run: |
