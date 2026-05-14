@@ -1,0 +1,167 @@
+name: Build predixy
+
+on:
+  workflow_call:
+    inputs:
+      release_version:
+        required: true
+        type: string
+      make_latest:
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      release_version:
+        description: "The version of predixy being built"
+        value: ${{ jobs.prepare.outputs.release_version }}
+
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Version to release (e.g. 1.0.5)'
+        required: true
+        type: string
+      make_latest:
+        description: 'Mark as latest release'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark as prerelease'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.setup.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup environment
+        id: setup
+        run: |
+          VERSION="${{ inputs.release_version }}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "PREDIXY_DIST=predixy-$VERSION" >> $GITHUB_ENV
+          git archive -o predixy-$VERSION.tar.gz HEAD
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: predixy-source
+          path: predixy-${{ inputs.release_version }}.tar.gz
+
+  build-linux:
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get install -y g++ make
+
+      - name: Build
+        run: |
+          cd src
+          make EV=epoll -j$(nproc)
+
+      - name: Verify
+        run: src/predixy --version
+
+      - name: Package
+        run: |
+          VERSION="${{ needs.prepare.outputs.release_version }}"
+          DIST="predixy-$VERSION-linux-x64"
+          mkdir -p "$DIST/conf"
+          cp src/predixy "$DIST/"
+          cp conf/*.conf "$DIST/conf/"
+          tar czf "$DIST.tar.gz" "$DIST"
+          sha256sum "$DIST.tar.gz" > "$DIST.tar.gz.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: predixy-linux
+          path: |
+            predixy-*-linux-x64.tar.gz
+            predixy-*-linux-x64.tar.gz.sha256
+
+  build-msys2:
+    needs: prepare
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: gcc make zip
+
+      - name: Build with MSYS2
+        shell: msys2 {0}
+        run: |
+          cd src
+          make EV=poll -j$(nproc)
+
+      - name: Verify
+        shell: msys2 {0}
+        run: src/predixy.exe --version
+
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          VERSION="${{ needs.prepare.outputs.release_version }}"
+          DIST="predixy-$VERSION-Windows-x64-msys2"
+          mkdir -p "$DIST/conf"
+          cp src/predixy.exe "$DIST/"
+          cp conf/*.conf "$DIST/conf/"
+          cp /usr/bin/msys-2.0.dll "$DIST/"
+          for dll in $(ldd src/predixy.exe 2>/dev/null | grep -oP '/usr/bin/msys-[^\s]+' | sort -u); do
+            cp "$dll" "$DIST/" 2>/dev/null || true
+          done
+          zip -q -r "$DIST.zip" "$DIST"
+          sha256sum "$DIST.zip" > "$DIST.zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: predixy-msys2
+          path: |
+            predixy-*-Windows-x64-msys2.zip
+            predixy-*-Windows-x64-msys2.zip.sha256
+
+  release:
+    needs: [prepare, build-linux, build-msys2]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set version
+        run: |
+          echo "VERSION=${{ needs.prepare.outputs.release_version }}" >> $GITHUB_ENV
+          echo "PREDIXY_DIST=predixy-${{ needs.prepare.outputs.release_version }}" >> $GITHUB_ENV
+
+      - uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: predixy ${{ env.VERSION }}
+          tag_name: ${{ env.VERSION }}
+          make_latest: "${{ inputs.make_latest }}"
+          prerelease: ${{ inputs.prerelease }}
+          files: |
+            predixy-linux/${{ env.PREDIXY_DIST }}-linux-x64.tar.gz
+            predixy-linux/${{ env.PREDIXY_DIST }}-linux-x64.tar.gz.sha256
+            predixy-msys2/${{ env.PREDIXY_DIST }}-Windows-x64-msys2.zip
+            predixy-msys2/${{ env.PREDIXY_DIST }}-Windows-x64-msys2.zip.sha256
